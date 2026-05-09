@@ -1,0 +1,75 @@
+Planora - Run & Test Instructions (Current Codebase)
+Generated: 2026-05-08
+
+Note: This repo currently appears to be partially integrated.
+- Backend APIs for tasks/planner/chat/analytics exist (protected by Firebase auth).
+- Frontend pages are mostly mock/local and may not call backend yet.
+
+A) Prerequisites
+1) Install Node.js (LTS recommended)
+2) Create Firebase project + service account
+3) Create Gemini API key
+
+B) Configure environment variables
+1) Backend (.env expected in backend folder)
+- Create file: backend/.env
+- Required (based on code):
+  - GEMINI_API_KEY
+  - FIREBASE_PROJECT_ID
+  - FIREBASE_CLIENT_EMAIL
+  - FIREBASE_PRIVATE_KEY
+  - (optional) CORS_ORIGIN
+- FIREBASE_PRIVATE_KEY formatting:
+  - If key contains newlines, store as escaped newlines (\n) so code can convert.
+
+2) Frontend
+- If/when the frontend integrates API calls, it may need backend base URL.
+- Currently frontend seems mostly mocked; you may not need env vars to start.
+
+C) Install dependencies
+Run these from repository root:
+1) Backend
+   - cd backend
+   - npm install
+
+2) Frontend
+   - cd frontend
+   - npm install
+
+D) Start backend server
+From backend folder:
+- npm run dev
+(or: npm start)
+
+Backend should start Express (port default inferred from server.js; set via env if needed).
+
+E) Start frontend dev server
+From frontend folder:
+- npm run dev
+
+Open the URL Vite prints (commonly http://localhost:5173).
+
+F) Test what works now
+1) Backend health
+- Visit: GET http://localhost:<backendPort>/health
+- Expect: { ok: true }
+
+2) Backend endpoints (requires Firebase ID token)
+- Verify tasks CRUD:
+  - Authorization: Bearer <Firebase_ID_TOKEN>
+  - Use any API client (Postman/curl) to test:
+    - /api/tasks
+    - /api/tasks/:taskId/toggle
+- Verify planner/chat/analytics similarly using a valid Firebase token.
+
+3) Frontend UI
+- Navigation should work.
+- Pages may display mock data rather than calling backend endpoints.
+
+G) What to verify once full integration is implemented (future)
+- Login should authenticate and store ID token.
+- Every API request from frontend should include Authorization header.
+- UI actions should reflect backend persistence.
+
+End of instructions.
+

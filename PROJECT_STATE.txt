@@ -1,0 +1,391 @@
+Project: Planora (backend + frontend)
+Generated: 2026-05-08
+
+============================================================
+1) Repo / High-level structure
+============================================================
+- Root:
+  - TODO.md
+  - backend/
+  - frontend/
+
+- Backend (Node.js/Express):
+  - backend/package.json
+  - backend/src/server.js (startup)
+  - backend/src/app.js (app wiring: middleware, routes)
+  - backend/src/config/cors.js
+  - backend/src/firebase/admin.js (Firebase Admin SDK init + Firestore/Auth handles)
+  - backend/src/middleware/auth.js (Firebase ID token verification)
+  - backend/src/middleware/errorHandler.js (notFound + centralized error handler)
+  - backend/src/routes/ (tasks, planner, chat, analytics, reminders)
+  - backend/src/controllers/ (tasks, planner, chat, analytics, reminders)
+  - backend/src/services/ (AI services + analytics service)
+  - backend/src/utils/ (asyncHandler, apiError, validation)
+  - backend/src/prompts/ (plannerPrompt.js, chatPrompt.js)
+
+- Frontend (Vite + React):
+  - frontend/package.json
+  - frontend/vite.config.js
+  - frontend/index.html
+  - frontend/src/main.jsx
+  - frontend/src/App.jsx (React Router setup)
+  - frontend/src/styles/global.css (theme + component styles)
+  - frontend/src/components/ (layout, theme, ui)
+  - frontend/src/pages/ (Dashboard, Tasks, Planner, Analytics, Chat, Login)
+
+============================================================
+2) Backend: runtime / architecture status
+============================================================
+2.1 Entry points
+- backend/src/server.js
+  - Starts Express on PORT (default 8080)
+  - Logs: Planora backend listening on http://localhost:${port}
+
+- backend/src/app.js
+  - Middleware:
+    - helmet()
+    - express.json({ limit: '1mb' })
+    - cors(corsOptions)
+    - express-rate-limit (window/max configurable via env)
+  - Health endpoint: GET /health => { ok: true }
+  - Mounted routers:
+    - /api/tasks -> backend/src/routes/tasks.routes.js
+    - /api/planner -> backend/src/routes/planner.routes.js
+    - /api/chat -> backend/src/routes/chat.routes.js
+    - /api/analytics -> backend/src/routes/analytics.routes.js
+    - /api/reminders -> backend/src/routes/reminders.routes.js
+  - 404 + error handler
+
+2.2 CORS config
+- backend/src/config/cors.js
+  - origin: process.env.CORS_ORIGIN || 'http://localhost:5173'
+  - allowedHeaders: Content-Type, Authorization
+  - credentials: false
+
+2.3 Authentication
+- backend/src/middleware/auth.js
+  - Reads Authorization header: expects "Bearer <token>"
+  - Uses Firebase Admin: auth.verifyIdToken(token)
+  - Sets req.user = { uid, email }
+  - Throws ApiError(401) if token missing
+
+2.4 Error handling
+- backend/src/middleware/errorHandler.js
+  - notFoundHandler: returns 404 JSON
+  - errorHandler:
+    - statusCode = ApiError.statusCode or 500
+    - logs stack only for statusCode >= 500
+    - response: { error: message, details: err.details || null }
+
+2.5 Utilities
+- backend/src/utils/asyncHandler.js: standard async wrapper for Express handlers
+- backend/src/utils/apiError.js: ApiError class
+- backend/src/utils/validation.js:
+  - taskSchema (zod) defines payload shape for tasks:
+    - title: string 1..200
+    - description: string max 2000 (optional)
+    - priority: enum High|Medium|Low default Medium
+    - category: string 1..50 default Work
+    - dueDate: string datetime OR date optional nullable
+    - completed: boolean optional default false
+
+============================================================
+3) Backend: implemented endpoints / behavior
+============================================================
+All routes are protected by requireAuth (router.use(requireAuth)).
+
+3.1 Tasks
+- Routes: backend/src/routes/tasks.routes.js
+- Endpoints:
+  - GET /api/tasks/today
+    - Queries Firestore collection "tasks" by userId
+    - Orders by dueDate asc
+    - Filters tasks whose dueDate matches "today" (supports Timestamp or string/date)
+    - Returns: { tasks: [...] }
+
+  - GET /api/tasks
+    - Query params: priority, category, status
+      - status=completed => where completed == true
+      - status=pending => where completed == false
+    - Returns: { tasks: filtered[] }
+
+  - POST /api/tasks
+    - Validates req.body via taskSchema
+    - Creates task doc with:
+      - userId, title, description, priority, category
+      - completed: Boolean(completed)
+      - dueDate: dueDate ? new Date(dueDate) : now
+      - createdAt/updatedAt timestamps
+    - Returns 201: { id }
+
+  - PATCH /api/tasks/:taskId
+    - Checks task exists and belongs to userId
+    - Accepts partial payload via taskSchema.partial()
+    - Updates provided fields; dueDate -> null if explicitly set to falsy/empty
+    - Returns: { ok: true }
+
+  - DELETE /api/tasks/:taskId
+    - Checks task exists and belongs to userId
+    - Deletes doc
+    - Returns: { ok: true }
+
+  - POST /api/tasks/:taskId/toggle
+    - Flips completed boolean
+    - Updates updatedAt
+    - Returns: { ok: true, completed: next }
+
+3.2 Planner (Gemini structured JSON)
+- Routes: backend/src/routes/planner.routes.js
+- Endpoint:
+  - POST /api/planner/generate
+    - Body: { goals: string, timezone?: string }
+    - Requires goals string non-empty
+    - Calls plannerService.generateDailyPlan({ userId, goals, timezone })
+    - Returns: { plan: <json> }
+
+- backend/src/services/ai/plannerService.js
+  - Calls aiService.generateText with:
+    - systemInstruction: strict JSON-only schema (timeline, priorities, focusSuggestions, estimatedProductivity, habitsImprovements, reschedule)
+    - prompt includes timezone and seed ideas
+  - normalizeJSON extracts the first {...} JSON substring then JSON.parse
+  - Validates presence of json.timeline array
+  - Stores last plan to Firestore collection "ai_memory" (non-fatal on failure)
+
+3.3 Chat (Gemini text + Firestore persistence)
+- Routes: backend/src/routes/chat.routes.js
+- Endpoints:
+  - GET /api/chat
+    - Lists recent conversation summaries (from chats collection)
+    - Returns: { conversations: [...] }
+
+  - GET /api/chat/history?chatId=<id>
+    - Returns message history: { chatId, history }
+
+  - POST /api/chat/message
+    - Body: { message: string, chatId?: string }
+    - If chatId provided:
+      - loads thread and ensures user ownership
+    - Else creates new doc id
+    - Loads previous messages (if any) and builds prompt context
+    - Calls aiService.generateText (systemInstruction plain actionable)
+    - Persists messages array into chats doc (merge)
+    - Also stores lightweight record in "ai_memory" (non-fatal)
+    - Returns: { chatId: <id>, message: <aiText> }
+
+- backend/src/services/ai/chatService.js includes:
+  - summarizeConversation(last 8 turns)
+  - listRecentConversations: Firestore "chats" ordered by updatedAt desc limit 10
+
+3.4 Analytics
+- Routes: backend/src/routes/analytics.routes.js
+- Endpoints:
+  - GET /api/analytics/today -> analyticsService.getTodayAnalytics
+  - GET /api/analytics/weekly -> analyticsService.getWeeklyAnalytics
+
+- backend/src/services/analytics/analyticsService.js
+  - Today analytics:
+    - Reads tasks from Firestore by userId (no date index filtering at query level)
+    - Builds "todays" by matching dueDate to today; fallback uses updatedAt matching today
+    - productivity score = round(completed / total * 100)
+    - streak: up to 60 consecutive days where at least one completed task updated within the day
+    - focusTimeHours approximated from completed tasks * 25 minutes
+    - recentActivity returns top 5 tasks sorted by updatedAt
+
+  - Weekly analytics:
+    - last 7 days array built in JS
+    - weekly points: productivity per day computed similarly (dueDate match or updatedAt match)
+    - avgProductivity = mean of points
+    - completionRate uses overall completedTasks / totalTasks
+    - overdueRisk heuristic: pending tasks with dueDate before today
+
+3.5 Reminders (scaffolding)
+- Routes: backend/src/routes/reminders.routes.js
+- Endpoints:
+  - GET /api/reminders -> listReminders
+  - POST /api/reminders -> createReminder
+  - DELETE /api/reminders/:reminderId -> deleteReminder
+
+- backend/src/controllers/reminders.controller.js
+  - Stub responses:
+    - listReminders: { reminders: [] }
+    - createReminder: { ok: true, reminderId: 'stub' }
+    - deleteReminder: { ok: true }
+
+============================================================
+4) Backend: AI integration status
+============================================================
+- backend/src/services/ai/aiService.js
+  - Uses @google/generative-ai
+  - require env: GEMINI_API_KEY
+  - Model: gemini-1.5-flash
+  - generateText({ prompt, systemInstruction }):
+    - builds parts = [systemInstruction?, prompt]
+    - model.generateContent({ contents: [{ role: 'user', parts }] })
+    - returns response.text()
+
+- backend/src/prompts/
+  - plannerPrompt.js, chatPrompt.js exist but are not referenced in the services read above (current services inline SYSTEM strings).
+
+- backend/src/firebase/admin.js
+  - Initializes Firebase Admin once
+  - Env required (if admin.apps.length == 0):
+    - FIREBASE_PROJECT_ID
+    - FIREBASE_CLIENT_EMAIL
+    - FIREBASE_PRIVATE_KEY (supports escaped newlines via replace(/\\n/g,'\n'))
+  - Exposes:
+    - db = admin.firestore()
+    - auth = admin.auth()
+
+============================================================
+5) Frontend: runtime / UI status
+============================================================
+5.1 Entry + routing
+- frontend/src/main.jsx
+  - React.StrictMode
+  - BrowserRouter
+  - <App />
+
+- frontend/src/App.jsx
+  - Routes:
+    - / -> redirects to /login
+    - /login -> LoginPage
+    - /app -> renders AppLayout containing nested routes:
+      - /app/dashboard -> DashboardPage
+      - /app/tasks -> TasksPage
+      - /app/planner -> PlannerPage
+      - /app/chat -> ChatPage
+      - /app/analytics -> AnalyticsPage
+      - /app/* -> redirect to /app/dashboard
+    - * -> redirect to /login
+
+5.2 Theme
+- frontend/src/components/theme/ThemeProvider.jsx
+  - Theme stored in localStorage under planora_theme
+  - Sets documentElement data-theme to 'light'/'dark'
+  - toggleTheme flips and persists
+
+- frontend/src/components/theme/useTheme.js
+  - useContext(ThemeContext)
+
+5.3 Global styling
+- frontend/src/styles/global.css
+  - Defines CSS variables for light + dark
+  - Styles for container, card, btn, input, badge, muted, etc.
+
+5.4 Layout components
+- AppLayout: frontend/src/components/layout/AppLayout.jsx
+  - Topbar fixed 64px
+  - Sidebar toggled via state
+  - main has padding: '84px 18px 26px'
+
+- Sidebar: frontend/src/components/layout/Sidebar.jsx
+  - Nav links:
+    - Dashboard /app/dashboard
+    - Tasks /app/tasks
+    - AI Planner /app/planner
+    - Chat Assistant /app/chat
+    - Analytics /app/analytics
+
+- Topbar: frontend/src/components/layout/Topbar.jsx
+  - Menu button triggers sidebar open
+  - Theme toggle button
+
+5.5 Pages
+- LoginPage (frontend/src/pages/LoginPage.jsx)
+  - Currently MOCK auth:
+    - Login/Register buttons do not call backend or Firebase
+    - Login button navigates directly to /app/dashboard
+
+- DashboardPage
+  - Currently MOCK data (hardcoded tasks + stats)
+  - Button navigates to /app/planner
+
+- TasksPage
+  - Currently uses local state with MOCK tasks:
+    - tasks array with { id, title, priority, category, done }
+  - UI includes filters and add task button, but does not call backend API.
+
+- PlannerPage
+  - Currently MOCK generation:
+    - “Generate Plan” uses goal text parsing to create timeline items locally
+  - “Copy timeline” uses clipboard
+  - “Add to tasks” navigates to /app/tasks
+  - No backend call to /api/planner/generate.
+
+- ChatPage
+  - Currently MOCK AI responses:
+    - generateAI returns canned responses based on keywords in user text
+  - Chat history is stored only in component state
+  - No backend calls to /api/chat endpoints.
+
+- AnalyticsPage
+  - Currently MOCK data + inline charts (SVG)
+  - No backend calls to /api/analytics endpoints.
+
+============================================================
+6) Frontend ↔ Backend integration status (observed)
+============================================================
+- No axios/fetch API client code is present in the opened files.
+- Pages for tasks/planner/chat/analytics currently do not call backend.
+- Login does authenticate via Firebase (frontend now uses AuthContext + protected routing).
+
+Therefore, the current project state is:
+- Backend provides full CRUD + AI + analytics endpoints (protected by Firebase auth).
+- Frontend provides the full UX shell, but most pages are still mocked/stubbed on the client side.
+
+============================================================
+7) Project TODO (existing)
+============================================================
+- TODO.md (root) contains a checklist that matches the current observed state:
+  - Backend:
+    - create backend directory structure per requirements
+    - add scripts, sample .env
+    - initialize Firebase, auth middleware
+    - implement routes for tasks/planner/chat/analytics/reminders
+    - implement Gemini services
+    - input validation + centralized error handling
+    - CORS + rate limiting
+  - Frontend:
+    - add axios + API client with Authorization header
+    - add Firebase client SDK init and auth state handling
+    - update /login to real Firebase auth
+    - protected routing for /app/*
+    - update pages to call backend endpoints and/or Firestore realtime
+  - Dev/Testing:
+    - npm install in backend and frontend
+    - configure Firebase + service account
+    - configure Gemini API key
+    - run locally and test end-to-end flows
+
+============================================================
+8) Notable implementation notes / gaps
+============================================================
+Backend:
+- /api/reminders endpoints are placeholders (controller returns stub responses; no Firestore persistence yet).
+- Analytics currently fetches user tasks and computes metrics in memory (no date-indexed query optimization yet).
+- Planner/chat rely on Firestore collections:
+  - tasks
+  - ai_memory
+  - chats
+
+Frontend:
+- API client layer and backend integration are not implemented (current pages use mock data only).
+- Many UI pages are placeholders: Login does not call backend, Tasks/Planner/Chat/Analytics render locally generated or hardcoded content.
+
+============================================================
+9) Completed vs remaining (quick view)
+============================================================
+Completed (implemented in codebase):
+- Backend: Express app wiring, CORS, auth middleware (Firebase ID tokens), centralized error handling.
+- Backend: CRUD endpoints for tasks + AI planner + AI chat + analytics endpoints.
+- Frontend: React app shell, routing, theme toggle, layout components, protected routing wired.
+
+Remaining (to fully deliver end-to-end UX):
+- Backend: implement reminders persistence in Firestore + optional validation/error improvements.
+- Frontend: replace mock pages with real calls to backend endpoints and persist state.
+
+============================================================
+End of current project state report.
+
+
+

@@ -20,5 +20,11 @@ const getWeeklyAnalytics = asyncHandler(async (req, res) => {
   res.json(result);
 });
 
-module.exports = { getTodayAnalytics, getWeeklyAnalytics };
+const getMonthlyAnalytics = asyncHandler(async (req, res) => {
+  const userId = req.user.uid;
+  const result = await analyticsService.getMonthlyAnalytics({ userId });
+  res.json(result);
+});
+
+module.exports = { getTodayAnalytics, getWeeklyAnalytics, getMonthlyAnalytics };
 

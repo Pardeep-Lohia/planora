@@ -13,7 +13,7 @@ export default function LoginPage() {
   const [error, setError] = useState(null);
 
   const navigate = useNavigate();
-  const { login, register, loading } = useAuth();
+  const { login, register, loginWithGoogle, loading } = useAuth();
 
   const onSubmit = async () => {
     if (submitting || loading) return;
@@ -39,6 +39,20 @@ export default function LoginPage() {
         err?.message || (err?.code ? String(err.code) : null) ||
         'Authentication failed. Please try again.';
       setError(msg);
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  const onGoogle = async () => {
+    if (submitting || loading) return;
+    setError(null);
+    try {
+      setSubmitting(true);
+      await loginWithGoogle();
+      navigate('/app/dashboard', { replace: true });
+    } catch (err) {
+      setError(err?.message || 'Google login failed. Please try again.');
     } finally {
       setSubmitting(false);
     }
@@ -186,6 +200,15 @@ export default function LoginPage() {
                 style={{ width: '100%', padding: '12px 14px', opacity: submitting ? 0.75 : 1 }}
               >
                 {submitting ? (mode === 'login' ? 'Logging in…' : 'Creating account…') : mode === 'login' ? 'Login' : 'Register'}
+              </Button>
+
+              <Button
+                variant="ghost"
+                onClick={onGoogle}
+                disabled={submitting}
+                style={{ width: '100%', padding: '12px 14px', opacity: submitting ? 0.75 : 1 }}
+              >
+                Continue with Google
               </Button>
 
               <div className="muted" style={{ fontSize: 12, lineHeight: 1.5 }}>

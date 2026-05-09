@@ -10,9 +10,13 @@ const { corsOptions } = require('./config/cors');
 
 const tasksRoutes = require('./routes/tasks.routes');
 const plannerRoutes = require('./routes/planner.routes');
+const plannerAcceptRoutes = require('./routes/plannerAccept.routes');
+
 const chatRoutes = require('./routes/chat.routes');
 const analyticsRoutes = require('./routes/analytics.routes');
 const remindersRoutes = require('./routes/reminders.routes');
+const profileRoutes = require('./routes/profile.routes');
+const adminRoutes = require('./routes/admin.routes');
 
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 
@@ -40,9 +44,13 @@ app.get('/health', (req, res) => {
 
 app.use('/api/tasks', tasksRoutes);
 app.use('/api/planner', plannerRoutes);
+app.use('/api/planner', plannerAcceptRoutes);
+
 app.use('/api/chat', chatRoutes);
 app.use('/api/analytics', analyticsRoutes);
 app.use('/api/reminders', remindersRoutes);
+app.use('/api/profile', profileRoutes);
+app.use('/api/admin', adminRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

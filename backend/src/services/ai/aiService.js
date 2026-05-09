@@ -8,13 +8,11 @@ function getModel() {
   }
 
   const genAI = new GoogleGenerativeAI(apiKey);
-  // Using a chat-capable model; adjust if needed.
-  return genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const modelName = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  return genAI.getGenerativeModel({ model: modelName });
 }
 
 async function generateText({ prompt, systemInstruction }) {
-  const model = getModel();
-
   // Gemini JS supports content parts; keep it simple for beginner-friendly structure.
   const parts = [];
   if (systemInstruction) {
@@ -22,9 +20,31 @@ async function generateText({ prompt, systemInstruction }) {
   }
   parts.push({ text: prompt });
 
-  const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
-  const text = result.response.text();
-  return text;
+  const primary = process.env.GEMINI_MODEL || 'gemini-2.0-flash';
+  const candidates = [primary, 'gemini-2.0-flash-lite', 'gemini-flash-latest'];
+  let lastError = null;
+
+  for (const modelName of [...new Set(candidates)]) {
+    try {
+      const apiKey = process.env.GEMINI_API_KEY;
+      if (!apiKey) {
+        throw new Error('Missing GEMINI_API_KEY in environment');
+      }
+
+      const genAI = new GoogleGenerativeAI(apiKey);
+      const model = genAI.getGenerativeModel({ model: modelName });
+      const result = await model.generateContent({ contents: [{ role: 'user', parts }] });
+      return result.response.text();
+    } catch (error) {
+      lastError = error;
+      const message = String(error?.message || error);
+      if (!message.includes('not found') && !message.includes('NOT_FOUND') && !message.includes('404')) {
+        throw error;
+      }
+    }
+  }
+
+  throw lastError || new Error('Gemini generation failed');
 }
 
 module.exports = { generateText };

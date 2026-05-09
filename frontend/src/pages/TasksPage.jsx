@@ -6,79 +6,54 @@ import { tasksApi } from '../api/tasksApi.js';
 
 const PRIORITIES = ['High', 'Medium', 'Low'];
 const CATEGORIES = ['Work', 'Personal', 'Health', 'Learning'];
+const emptyForm = {
+  title: '',
+  description: '',
+  priority: 'Medium',
+  category: 'Work',
+  dueDate: '',
+  completed: false
+};
 
-function PriorityChip({ p }) {
-  const bg =
-    p === 'High'
-      ? 'rgba(239,68,68,.12)'
-      : p === 'Medium'
-        ? 'rgba(245,158,11,.12)'
-        : 'rgba(34,197,94,.12)';
-  const color =
-    p === 'High' ? 'rgba(239,68,68,.95)' : p === 'Medium' ? 'rgba(245,158,11,.95)' : 'rgba(34,197,94,.95)';
+function toInputDate(value) {
+  if (!value) return '';
+  const d = value.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+  return d.toISOString().slice(0, 16);
+}
 
-  return (
-    <span
-      className="badge"
-      style={{
-        background: bg,
-        borderColor: 'rgba(59,130,246,.20)',
-        color,
-        fontWeight: 850
-      }}
-    >
-      {p}
-    </span>
-  );
+function toPayload(form) {
+  return {
+    title: form.title.trim(),
+    description: form.description.trim(),
+    priority: form.priority,
+    category: form.category,
+    dueDate: form.dueDate ? new Date(form.dueDate).toISOString() : null,
+    completed: Boolean(form.completed)
+  };
 }
 
 export default function TasksPage() {
   const [tasks, setTasks] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-
+  const [form, setForm] = useState(emptyForm);
+  const [editingId, setEditingId] = useState(null);
   const [priorityFilter, setPriorityFilter] = useState('All');
   const [categoryFilter, setCategoryFilter] = useState('All');
-
-  const [newTitle, setNewTitle] = useState('');
-  const [newPriority, setNewPriority] = useState('Medium');
-  const [newCategory, setNewCategory] = useState('Work');
-  const [submitting, setSubmitting] = useState(false);
-
-  const filtered = useMemo(() => {
-    // Server already filters by status; we keep UI-level filters for priority/category.
-    return tasks.filter((t) => {
-      const pOk = priorityFilter === 'All' ? true : t.priority === priorityFilter;
-      const cOk = categoryFilter === 'All' ? true : t.category === categoryFilter;
-      return pOk && cOk;
-    });
-  }, [tasks, priorityFilter, categoryFilter]);
-
-  const completedCount = tasks.filter((t) => t.done).length;
-  const pendingCount = tasks.length - completedCount;
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const loadTasks = async () => {
     setLoading(true);
     setError(null);
     try {
-      const priority = priorityFilter === 'All' ? undefined : priorityFilter;
-      const category = categoryFilter === 'All' ? undefined : categoryFilter;
-
-      // Backend endpoint supports priority/category filters via query.
       const res = await tasksApi.list({
-        priority,
-        category
+        priority: priorityFilter === 'All' ? undefined : priorityFilter,
+        category: categoryFilter === 'All' ? undefined : categoryFilter,
+        status: statusFilter === 'All' ? undefined : statusFilter.toLowerCase()
       });
-
-      const mapped = (res?.data?.tasks || []).map((t) => ({
-        id: t.id,
-        title: t.title,
-        priority: t.priority,
-        category: t.category,
-        done: Boolean(t.completed)
-      }));
-
-      setTasks(mapped);
+      setTasks(res?.data?.tasks || []);
     } catch (e) {
       setError(e?.message || 'Failed to load tasks');
     } finally {
@@ -89,44 +64,77 @@ export default function TasksPage() {
   useEffect(() => {
     loadTasks();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [priorityFilter, categoryFilter]);
+  }, [priorityFilter, categoryFilter, statusFilter]);
 
-  const toggleDone = async (id) => {
-    setTasks((prev) => prev.map((t) => (t.id === id ? { ...t, done: !t.done } : t)));
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return tasks;
+    return tasks.filter((t) =>
+      [t.title, t.description, t.category, t.priority].filter(Boolean).join(' ').toLowerCase().includes(q)
+    );
+  }, [tasks, search]);
+
+  const completedCount = tasks.filter((t) => t.completed).length;
+  const pendingCount = tasks.length - completedCount;
+
+  const resetForm = () => {
+    setForm(emptyForm);
+    setEditingId(null);
+  };
+
+  const submitTask = async () => {
+    const payload = toPayload(form);
+    if (!payload.title) {
+      setError('Task title is required.');
+      return;
+    }
+
+    setLoading(true);
+    setError(null);
     try {
-      await tasksApi.toggle(id);
-      // refresh to ensure truth
+      if (editingId) await tasksApi.update(editingId, payload);
+      else await tasksApi.create(payload);
+      resetForm();
       await loadTasks();
     } catch (e) {
-      await loadTasks();
-      setError(e?.message || 'Failed to update task');
+      setError(e?.message || 'Failed to save task');
+    } finally {
+      setLoading(false);
     }
   };
 
-  const addTask = async () => {
-    const title = newTitle.trim();
-    if (!title) return;
-    if (submitting) return;
+  const editTask = (task) => {
+    setEditingId(task.id);
+    setForm({
+      title: task.title || '',
+      description: task.description || '',
+      priority: task.priority || 'Medium',
+      category: task.category || 'Work',
+      dueDate: toInputDate(task.dueDate),
+      completed: Boolean(task.completed)
+    });
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
 
-    setSubmitting(true);
-    setError(null);
+  const deleteTask = async (task) => {
+    if (!window.confirm(`Delete "${task.title}"?`)) return;
+    setLoading(true);
     try {
-      await tasksApi.create({
-        title,
-        description: '',
-        priority: newPriority,
-        category: newCategory,
-        dueDate: null,
-        completed: false
-      });
-      setNewTitle('');
-      setNewPriority('Medium');
-      setNewCategory('Work');
+      await tasksApi.remove(task.id);
       await loadTasks();
     } catch (e) {
-      setError(e?.message || 'Failed to create task');
+      setError(e?.message || 'Failed to delete task');
     } finally {
-      setSubmitting(false);
+      setLoading(false);
+    }
+  };
+
+  const toggleDone = async (task) => {
+    try {
+      await tasksApi.toggle(task.id);
+      await loadTasks();
+    } catch (e) {
+      setError(e?.message || 'Failed to update task');
     }
   };
 
@@ -134,254 +142,97 @@ export default function TasksPage() {
     <div style={{ display: 'grid', gap: 18 }}>
       <div style={{ display: 'flex', alignItems: 'flex-end', justifyContent: 'space-between', gap: 16 }}>
         <div>
-          <div style={{ fontWeight: 950, fontSize: 28, letterSpacing: '-.4px' }}>Tasks</div>
-          <div className="muted" style={{ marginTop: 6 }}>
-            Card-based task manager with clean filters.
-          </div>
+          <div style={{ fontWeight: 950, fontSize: 28 }}>Tasks</div>
+          <div className="muted" style={{ marginTop: 6 }}>Create, schedule, filter, and finish work.</div>
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          <div className="badge" style={{ background: 'rgba(34,197,94,.10)', borderColor: 'rgba(34,197,94,.25)', color: 'rgba(34,197,94,.95)' }}>
-            Completed: {completedCount}
-          </div>
-          <div className="badge" style={{ background: 'rgba(245,158,11,.10)', borderColor: 'rgba(245,158,11,.25)', color: 'rgba(245,158,11,.95)' }}>
-            Pending: {pendingCount}
-          </div>
+          <span className="badge">Completed: {completedCount}</span>
+          <span className="badge">Pending: {pendingCount}</span>
         </div>
       </div>
 
+      {error ? <div className="badge" style={{ color: 'var(--danger)', borderColor: 'rgba(239,68,68,.35)' }}>{error}</div> : null}
+
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
         <Card style={{ padding: 18 }}>
-          <div style={{ fontWeight: 900 }}>Filters</div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5 }}>
-            Narrow down by priority and category.
-          </div>
-
+          <div style={{ fontWeight: 900 }}>{editingId ? 'Edit task' : 'Add task'}</div>
           <div style={{ marginTop: 14, display: 'grid', gap: 12 }}>
-            <label>
-              <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Priority</div>
-              <select
-                value={priorityFilter}
-                onChange={(e) => setPriorityFilter(e.target.value)}
-                className="input"
-                style={{ appearance: 'none' }}
-              >
-                <option value="All">All</option>
-                {PRIORITIES.map((p) => (
-                  <option key={p} value={p}>
-                    {p}
-                  </option>
-                ))}
+            <Input placeholder="Task title" value={form.title} onChange={(e) => setForm({ ...form, title: e.target.value })} />
+            <textarea
+              className="input"
+              rows={3}
+              placeholder="Description"
+              value={form.description}
+              onChange={(e) => setForm({ ...form, description: e.target.value })}
+            />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <select className="input" value={form.priority} onChange={(e) => setForm({ ...form, priority: e.target.value })}>
+                {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
               </select>
-            </label>
-
-            <label>
-              <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Category</div>
-              <select
-                value={categoryFilter}
-                onChange={(e) => setCategoryFilter(e.target.value)}
-                className="input"
-                style={{ appearance: 'none' }}
-              >
-                <option value="All">All</option>
-                {CATEGORIES.map((c) => (
-                  <option key={c} value={c}>
-                    {c}
-                  </option>
-                ))}
+              <select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
               </select>
+            </div>
+            <Input type="datetime-local" value={form.dueDate} onChange={(e) => setForm({ ...form, dueDate: e.target.value })} />
+            <label style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <input type="checkbox" checked={form.completed} onChange={(e) => setForm({ ...form, completed: e.target.checked })} />
+              <span className="muted">Completed</span>
             </label>
-
-            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginTop: 2 }}>
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  setPriorityFilter('All');
-                  setCategoryFilter('All');
-                }}
-                style={{ padding: '10px 12px' }}
-              >
-                Reset
-              </Button>
+            <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+              <Button variant="primary" onClick={submitTask} disabled={loading}>{editingId ? 'Save changes' : 'Add task'}</Button>
+              {editingId ? <Button variant="ghost" onClick={resetForm}>Cancel</Button> : null}
             </div>
           </div>
         </Card>
 
         <Card style={{ padding: 18 }}>
-          <div style={{ fontWeight: 900 }}>Add task</div>
-          <div className="muted" style={{ marginTop: 6, fontSize: 13, lineHeight: 1.5 }}>
-            Keep it small. Keep it moving.
-          </div>
-
+          <div style={{ fontWeight: 900 }}>Filters</div>
           <div style={{ marginTop: 14, display: 'grid', gap: 12 }}>
-            <div>
-              <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Title</div>
-              <Input
-                value={newTitle}
-                onChange={(e) => setNewTitle(e.target.value)}
-                placeholder="e.g. Draft meeting agenda"
-              />
+            <Input placeholder="Search tasks" value={search} onChange={(e) => setSearch(e.target.value)} />
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12 }}>
+              <select className="input" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
+                <option>All</option>
+                <option>Pending</option>
+                <option>Completed</option>
+              </select>
+              <select className="input" value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)}>
+                <option>All</option>
+                {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+              </select>
+              <select className="input" value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+                <option>All</option>
+                {CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+              </select>
             </div>
-
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-              <label>
-                <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Priority</div>
-                <select
-                  value={newPriority}
-                  onChange={(e) => setNewPriority(e.target.value)}
-                  className="input"
-                  style={{ appearance: 'none' }}
-                >
-                  {PRIORITIES.map((p) => (
-                    <option key={p} value={p}>
-                      {p}
-                    </option>
-                  ))}
-                </select>
-              </label>
-
-              <label>
-                <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Category</div>
-                <select
-                  value={newCategory}
-                  onChange={(e) => setNewCategory(e.target.value)}
-                  className="input"
-                  style={{ appearance: 'none' }}
-                >
-                  {CATEGORIES.map((c) => (
-                    <option key={c} value={c}>
-                      {c}
-                    </option>
-                  ))}
-                </select>
-              </label>
-            </div>
-
-            <Button variant="primary" onClick={addTask} style={{ width: '100%', padding: '12px 14px' }}>
-              Add Task
-            </Button>
           </div>
         </Card>
       </div>
 
       <Card style={{ padding: 18 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
-          <div>
-            <div style={{ fontWeight: 900 }}>Task list</div>
-            <div className="muted" style={{ marginTop: 6, fontSize: 13 }}>
-              {filtered.length} item(s) match your filters.
-            </div>
-          </div>
-          <div className="badge">Toggle status</div>
-        </div>
-
+        <div style={{ fontWeight: 900 }}>Task list</div>
         <div style={{ marginTop: 14, display: 'grid', gap: 10 }}>
-          {loading ? (
-            <div className="muted" style={{ padding: 16, textAlign: 'center' }}>
-              Loading tasks9797979...
-            </div>
-          ) : error ? (
-            <div
-              className="badge"
-              style={{
-                background: 'rgba(239,68,68,.10)',
-                borderColor: 'rgba(239,68,68,.30)',
-                color: 'rgba(239,68,68,.95)',
-                padding: 14,
-                borderRadius: 14,
-                textAlign: 'center'
-              }}
-              role="alert"
-            >
-              {error}
-            </div>
-          ) : filtered.length ? (
-            filtered.map((t) => (
-              <div
-                key={t.id}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1.2fr .6fr .7fr .8fr',
-                  gap: 12,
-                  alignItems: 'center',
-                  padding: 12,
-                  borderRadius: 16,
-                  border: '1px solid var(--border)',
-                  background: 'rgba(255,255,255,.25)'
-                }}
-              >
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  <div
-                    style={{
-                      fontWeight: 900,
-                      textDecoration: t.done ? 'line-through' : 'none',
-                      color: t.done ? 'var(--muted)' : 'var(--text)'
-                    }}
-                  >
-                    {t.title}
-                  </div>
-                  <div className="muted" style={{ fontSize: 12 }}>{t.category}</div>
-                </div>
-
-                <div>
-                  <PriorityChip p={t.priority} />
-                </div>
-
-                <div className="badge" style={{ background: 'rgba(59,130,246,.08)' }}>
-                  {t.category}
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer' }}>
-                    <input
-                      type="checkbox"
-                      checked={t.done}
-                      onChange={() => toggleDone(t.id)}
-                      style={{ width: 18, height: 18 }}
-                      aria-label={`Mark task ${t.title} as ${t.done ? 'pending' : 'completed'}`}
-                      disabled={loading}
-                    />
-                    <span className="muted" style={{ fontWeight: 850, fontSize: 13 }}>
-                      {t.done ? 'Completed' : 'Pending'}
-                    </span>
-                  </label>
+          {loading ? <div className="muted">Loading tasks...</div> : null}
+          {!loading && !filtered.length ? <div className="muted">No tasks found.</div> : null}
+          {filtered.map((task) => (
+            <div key={task.id} style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: 12, padding: 12, border: '1px solid var(--border)', borderRadius: 14 }}>
+              <div>
+                <div style={{ fontWeight: 900, textDecoration: task.completed ? 'line-through' : 'none' }}>{task.title}</div>
+                <div className="muted" style={{ marginTop: 4, fontSize: 13 }}>{task.description || 'No description'}</div>
+                <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  <span className="badge">{task.priority}</span>
+                  <span className="badge">{task.category}</span>
+                  <span className="badge">{task.dueDate ? new Date(task.dueDate.seconds ? task.dueDate.seconds * 1000 : task.dueDate).toLocaleString() : 'No due date'}</span>
                 </div>
               </div>
-            ))
-          ) : (
-            <div className="muted" style={{ padding: 16, textAlign: 'center' }}>
-              No tasks found. Adjust your filters or add a new task.
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                <Button variant="ghost" onClick={() => toggleDone(task)}>{task.completed ? 'Pending' : 'Complete'}</Button>
+                <Button variant="ghost" onClick={() => editTask(task)}>Edit</Button>
+                <Button variant="ghost" onClick={() => deleteTask(task)}>Delete</Button>
+              </div>
             </div>
-          )}
+          ))}
         </div>
       </Card>
-
-      <div style={{ position: 'fixed', right: 18, bottom: 18, zIndex: 40 }}>
-        <Button
-          variant="primary"
-          onClick={() => {
-            // focus title input by scrolling to top (simple)
-            window.scrollTo({ top: 0, behavior: 'smooth' });
-            setTimeout(() => {
-              const el = document.querySelector('input[placeholder^="e.g."]');
-              el?.focus?.();
-            }, 350);
-          }}
-          style={{ padding: '12px 14px', borderRadius: 999 }}
-          aria-label="Add task"
-        >
-          Add
-        </Button>
-      </div>
-
-      <style>{`
-        @media (max-width: 980px){
-          div[style*="gridTemplateColumns: '1.2fr .6fr .7fr .8fr'"]{ grid-template-columns: 1fr 1fr !important; }
-        }
-        @media (max-width: 640px){
-          div[style*="gridTemplateColumns: '1.2fr .6fr .7fr .8fr'"]{ grid-template-columns: 1fr !important; }
-        }
-      `}</style>
     </div>
   );
 }
-

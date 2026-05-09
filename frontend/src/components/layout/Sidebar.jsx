@@ -7,6 +7,10 @@ import {
   FiMessageCircle,
   FiBarChart2,
   FiActivity,
+  FiBell,
+  FiCalendar,
+  FiUser,
+  FiShield,
   FiX
 } from 'react-icons/fi';
 
@@ -15,7 +19,11 @@ const items = [
   { to: '/app/tasks', label: 'Tasks', icon: <FiCheckSquare /> },
   { to: '/app/planner', label: 'AI Planner', icon: <FiActivity /> },
   { to: '/app/chat', label: 'Chat Assistant', icon: <FiMessageCircle /> },
-  { to: '/app/analytics', label: 'Analytics', icon: <FiBarChart2 /> }
+  { to: '/app/analytics', label: 'Analytics', icon: <FiBarChart2 /> },
+  { to: '/app/calendar', label: 'Calendar', icon: <FiCalendar /> },
+  { to: '/app/notifications', label: 'Notifications', icon: <FiBell /> },
+  { to: '/app/profile', label: 'Profile', icon: <FiUser /> },
+  { to: '/app/admin', label: 'Admin', icon: <FiShield /> }
 ];
 
 export function Sidebar({ open, onClose }) {

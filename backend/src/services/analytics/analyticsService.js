@@ -164,5 +164,43 @@ async function getWeeklyAnalytics({ userId }) {
   };
 }
 
-module.exports = { getTodayAnalytics, getWeeklyAnalytics };
+async function getMonthlyAnalytics({ userId }) {
+  const now = new Date();
+  const start = new Date(now.getFullYear(), now.getMonth(), 1);
+  const end = new Date(now.getFullYear(), now.getMonth() + 1, 0);
+  const daysInMonth = end.getDate();
+
+  const snap = await db.collection('tasks').where('userId', '==', userId).get();
+  const all = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+
+  const points = Array.from({ length: daysInMonth }).map((_, idx) => {
+    const day = new Date(start);
+    day.setDate(idx + 1);
+    const tasks = all.filter((t) => {
+      const due = t.dueDate?.toDate ? t.dueDate.toDate() : t.dueDate ? new Date(t.dueDate) : null;
+      if (due) return isSameDate(due, day);
+      const upd = t.updatedAt?.toDate ? t.updatedAt.toDate() : t.updatedAt ? new Date(t.updatedAt) : null;
+      return upd ? isSameDate(upd, day) : false;
+    });
+    return {
+      day: idx + 1,
+      productivity: computeProductivity({ tasks }),
+      completed: tasks.filter((t) => t.completed).length,
+      pending: tasks.filter((t) => !t.completed).length
+    };
+  });
+
+  const activeDays = points.filter((p) => p.completed || p.pending).length;
+  const avgProductivity = activeDays
+    ? Math.round(points.reduce((sum, p) => sum + p.productivity, 0) / activeDays)
+    : 0;
+
+  return {
+    month: now.toLocaleString('en', { month: 'long', year: 'numeric' }),
+    points,
+    avgProductivity
+  };
+}
+
+module.exports = { getTodayAnalytics, getWeeklyAnalytics, getMonthlyAnalytics };
 

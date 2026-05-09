@@ -6,6 +6,10 @@ import TasksPage from './pages/TasksPage.jsx';
 import PlannerPage from './pages/PlannerPage.jsx';
 import ChatPage from './pages/ChatPage.jsx';
 import AnalyticsPage from './pages/AnalyticsPage.jsx';
+import ProfilePage from './pages/ProfilePage.jsx';
+import NotificationsPage from './pages/NotificationsPage.jsx';
+import CalendarPage from './pages/CalendarPage.jsx';
+import AdminPage from './pages/AdminPage.jsx';
 import { AppLayout } from './components/layout/AppLayout.jsx';
 import { ThemeProvider } from './components/theme/ThemeProvider.jsx';
 import { RequireAuth } from './components/protected/RequireAuth.jsx';
@@ -70,6 +74,38 @@ export default function App() {
           element={
             <ProtectedRoute>
               <AnalyticsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/profile"
+          element={
+            <ProtectedRoute>
+              <ProfilePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/notifications"
+          element={
+            <ProtectedRoute>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/calendar"
+          element={
+            <ProtectedRoute>
+              <CalendarPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/app/admin"
+          element={
+            <ProtectedRoute>
+              <AdminPage />
             </ProtectedRoute>
           }
         />

@@ -15,6 +15,25 @@ function summarizeConversation(messages) {
     .join('\n');
 }
 
+async function getTaskContext({ userId }) {
+  const snap = await db
+    .collection('tasks')
+    .where('userId', '==', userId)
+    .orderBy('createdAt', 'desc')
+    .limit(12)
+    .get();
+
+  const tasks = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+  if (!tasks.length) return 'No saved tasks yet.';
+
+  return tasks
+    .map((t) => {
+      const due = t.dueDate?.toDate ? t.dueDate.toDate().toISOString() : t.dueDate || 'unscheduled';
+      return `- ${t.title} | ${t.completed ? 'completed' : 'pending'} | ${t.priority || 'Medium'} | ${t.category || 'Work'} | due ${due}`;
+    })
+    .join('\n');
+}
+
 async function listRecentConversations({ userId }) {
   // Conversations are stored as docs in /chats where doc contains messages.
   // For simplicity: return distinct chat threads from chat docs.
@@ -62,8 +81,9 @@ async function sendMessage({ userId, message, chatId }) {
   const nextMessages = [...prevMessages, { role: 'user', text: message, createdAt: now }];
 
   const context = summarizeConversation(nextMessages);
+  const taskContext = await getTaskContext({ userId });
 
-  const prompt = `Conversation so far:\n${context}\n\nUser message: ${message}`;
+  const prompt = `Saved task context:\n${taskContext}\n\nConversation so far:\n${context}\n\nUser message: ${message}`;
   const aiText = await aiService.generateText({ prompt, systemInstruction: SYSTEM });
 
   const reply = { role: 'ai', text: aiText, createdAt: new Date() };

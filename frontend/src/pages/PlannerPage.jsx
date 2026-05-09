@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from 'react';
 import { Card } from '../components/ui/Card.jsx';
 import { Button } from '../components/ui/Button.jsx';
-import { Input } from '../components/ui/Input.jsx';
+import { plannerApi } from '../api/plannerApi.js';
 
 const DEFAULT_TIMES = ['09:00', '10:30', '12:30', '14:30', '16:00', '17:30'];
 
@@ -42,36 +42,56 @@ function TimelineItem({ time, text, tone }) {
 export default function PlannerPage() {
   const [goals, setGoals] = useState('Finish sprint tasks, stay focused, and take a short walk.');
   const [items, setItems] = useState([]);
-  const [isGenerating, setIsGenerating] = useState(false);
+  const [acceptedPlan, setAcceptedPlan] = useState(null);
+  const [error, setError] = useState(null);
 
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [isAccepting, setIsAccepting] = useState(false);
   const tones = useMemo(() => ['primary', 'success', 'warning', 'primary', 'success', 'primary'], []);
 
   const generate = async () => {
     setIsGenerating(true);
+    setError(null);
+    try {
+      const res = await plannerApi.generate({ goals, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
+      const plan = res?.data?.plan;
 
-    // Mock "AI" generation
-    const base = goals
-      .split(/[\n,\.]/)
-      .map((s) => s.trim())
-      .filter(Boolean);
+      if (!plan || !Array.isArray(plan.timeline)) {
+        throw new Error('Planner returned invalid plan');
+      }
 
-    const goalBullets = base.length ? base : ['Focus on the right tasks', 'Move one task forward', 'Protect energy'];
+      const next = plan.timeline.map((b, idx) => {
+        const time = b.time || DEFAULT_TIMES[idx] || '';
+        const tone = b.tone || tones[idx % tones.length];
+        const task = (b.task || '').toString().trim();
+        const focus = (b.focus || '').toString().trim();
+        const text = task || focus || 'AI-suggested focus block';
+        return { time, text, tone };
+      });
 
-    const next = DEFAULT_TIMES.map((time, idx) => {
-      const g = goalBullets[idx % goalBullets.length];
-      const verbs = ['Plan', 'Deep work', 'Execute', 'Review', 'Optimize', 'Wind down'];
-      const v = verbs[idx % verbs.length];
-      const cleaned = g.replace(/^[-*\s]+/, '');
-      return {
-        time,
-        text: `${v}: ${cleaned[0].toUpperCase() + cleaned.slice(1)}`,
-        tone: tones[idx]
-      };
-    });
+      setAcceptedPlan(plan);
+      setItems(next);
+    } catch (e) {
+      setAcceptedPlan(null);
+      setItems([]);
+      setError(e?.message || 'Could not generate plan. Please check backend and Gemini configuration.');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
-    await new Promise((r) => setTimeout(r, 650));
-    setItems(next);
-    setIsGenerating(false);
+  const acceptPlan = async () => {
+    if (!acceptedPlan || isAccepting) return;
+    setIsAccepting(true);
+    setError(null);
+    try {
+      await plannerApi.accept(acceptedPlan);
+      window.location.href = '/app/tasks';
+    } catch (e) {
+      setError(e?.message || 'Could not accept plan.');
+    } finally {
+      setIsAccepting(false);
+    }
   };
 
   return (
@@ -83,10 +103,29 @@ export default function PlannerPage() {
             Turn goals into a clean timeline you can follow.
           </div>
         </div>
-        <Button variant="primary" onClick={generate} disabled={isGenerating} style={{ padding: '11px 14px', opacity: isGenerating ? 0.75 : 1 }}>
+        <Button
+          variant="primary"
+          onClick={generate}
+          disabled={isGenerating}
+          style={{ padding: '11px 14px', opacity: isGenerating ? 0.75 : 1 }}
+        >
           {isGenerating ? 'Generating…' : 'Generate Plan'}
         </Button>
       </div>
+
+      {error ? (
+        <div
+          className="badge"
+          style={{
+            background: 'rgba(239,68,68,.10)',
+            borderColor: 'rgba(239,68,68,.30)',
+            color: 'rgba(239,68,68,.95)'
+          }}
+          role="alert"
+        >
+          {error}
+        </div>
+      ) : null}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 18, alignItems: 'start' }}>
         <Card style={{ padding: 18 }}>
@@ -109,8 +148,18 @@ export default function PlannerPage() {
             </label>
 
             <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-              <Button variant="ghost" onClick={() => setGoals('Finish sprint tasks, stay focused, and take a short walk.')}>Example</Button>
-              <Button variant="ghost" onClick={() => setItems([])}>Clear output</Button>
+              <Button
+                variant="ghost"
+                onClick={() => setGoals('Finish sprint tasks, stay focused, and take a short walk.')}
+              >
+                Example
+              </Button>
+              <Button variant="ghost" onClick={() => {
+                setItems([]);
+                setAcceptedPlan(null);
+              }}>
+                Clear output
+              </Button>
             </div>
           </div>
         </Card>
@@ -141,7 +190,7 @@ export default function PlannerPage() {
               <Button
                 variant="primary"
                 onClick={() => {
-                  // mock: copy to clipboard
+                  // copy to clipboard
                   const text = items.map((i) => `${i.time} - ${i.text}`).join('\n');
                   navigator.clipboard?.writeText?.(text);
                 }}
@@ -149,8 +198,13 @@ export default function PlannerPage() {
               >
                 Copy timeline
               </Button>
-              <Button variant="ghost" onClick={() => window.location.href = '/app/tasks'} style={{ padding: '10px 12px' }}>
-                Add to tasks
+              <Button
+                variant="primary"
+                onClick={acceptPlan}
+                style={{ padding: '10px 12px' }}
+                disabled={!acceptedPlan || isAccepting}
+              >
+                {isAccepting ? 'Accepting…' : 'Accept plan'}
               </Button>
             </div>
           ) : null}

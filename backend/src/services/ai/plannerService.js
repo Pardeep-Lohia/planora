@@ -1,5 +1,4 @@
 const { db } = require('../../firebase/admin');
-const { ApiError } = require('../../utils/apiError');
 const aiService = require('./aiService');
 
 const SYSTEM = `You are Planora, an AI productivity coach.
@@ -28,6 +27,34 @@ function buildTimelineFromGoals({ goals }) {
   return base;
 }
 
+function buildFallbackPlan({ goals }) {
+  const ideas = buildTimelineFromGoals({ goals });
+  const times = ['09:00', '10:30', '12:00', '14:00', '15:30', '17:00'];
+  const verbs = ['Plan', 'Deep work', 'Execute', 'Review', 'Polish', 'Wrap up'];
+
+  return {
+    timeline: times.map((time, idx) => {
+      const idea = ideas[idx % ideas.length];
+      return {
+        time,
+        task: `${verbs[idx]}: ${idea}`,
+        focus: `Focus on ${idea.toLowerCase()} with a clear next action.`,
+        tone: idx === 1 || idx === 3 ? 'success' : idx === 4 ? 'warning' : 'primary'
+      };
+    }),
+    priorities: ['High', 'Medium', 'Low'],
+    focusSuggestions: [
+      'Start with the highest-impact task.',
+      'Use 25-minute focus blocks.',
+      'Review progress before switching context.'
+    ],
+    estimatedProductivity: 72,
+    habitsImprovements: ['Keep tasks small enough to start immediately.'],
+    reschedule: [],
+    generatedBy: 'fallback'
+  };
+}
+
 function normalizeJSON(text) {
   // Model might return extra whitespace; try to extract JSON substring.
   const first = text.indexOf('{');
@@ -46,17 +73,22 @@ async function generateDailyPlan({ userId, goals, timezone }) {
 - Also return habitsImprovements and reschedule suggestions for unfinished tasks.
 Use this seed ideas: ${timelineSeed.join(' | ')}.`;
 
-  const aiText = await aiService.generateText({ prompt, systemInstruction: SYSTEM });
+  let aiText = '';
+  try {
+    aiText = await aiService.generateText({ prompt, systemInstruction: SYSTEM });
+  } catch (e) {
+    return buildFallbackPlan({ goals });
+  }
 
   let json = null;
   try {
     json = normalizeJSON(aiText);
   } catch (e) {
-    throw new ApiError(502, 'Gemini returned invalid JSON');
+    return buildFallbackPlan({ goals });
   }
 
   if (!json || !Array.isArray(json.timeline)) {
-    throw new ApiError(502, 'Gemini plan missing timeline');
+    return buildFallbackPlan({ goals });
   }
 
   // Store last plan for the user (optional, keeps future AI context).

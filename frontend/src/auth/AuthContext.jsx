@@ -3,8 +3,10 @@ import { initializeApp } from 'firebase/app';
 import {
   createUserWithEmailAndPassword,
   getAuth,
+  GoogleAuthProvider,
   onAuthStateChanged,
   signInWithEmailAndPassword,
+  signInWithPopup,
   signOut
 } from 'firebase/auth';
 
@@ -98,6 +100,13 @@ export function AuthProvider({ children }) {
 
     login: async (email, password) => {
       const cred = await signInWithEmailAndPassword(auth, email, password);
+      setUser(cred.user);
+      return cred.user;
+    },
+
+    loginWithGoogle: async () => {
+      const provider = new GoogleAuthProvider();
+      const cred = await signInWithPopup(auth, provider);
       setUser(cred.user);
       return cred.user;
     },

@@ -102,8 +102,8 @@ export default function DashboardPage() {
     };
   }, []);
 
-  const completed = analytics?.productivity?.completed ?? analytics?.completed ?? 0;
-  const pending = analytics?.productivity?.pending ?? analytics?.pending ?? 0;
+  const completed = analytics?.stats?.completed ?? analytics?.productivity?.completed ?? analytics?.completed ?? 0;
+  const pending = analytics?.stats?.pending ?? analytics?.productivity?.pending ?? analytics?.pending ?? 0;
   const productivity = analytics?.productivity ?? analytics?.productivityScore ?? analytics?.score ?? 0;
 
   const safeCompleted = Number.isFinite(Number(completed)) ? Number(completed) : 0;
@@ -236,11 +236,11 @@ export default function DashboardPage() {
           <div style={{ marginTop: 14, display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
             <div style={{ padding: 14, borderRadius: 14, border: '1px solid var(--border)', background: 'rgba(255,255,255,.25)' }}>
               <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Streak</div>
-              <div style={{ marginTop: 6, fontWeight: 950, fontSize: 22 }}>7 days</div>
+              <div style={{ marginTop: 6, fontWeight: 950, fontSize: 22 }}>{analytics?.streak ?? 0} days</div>
             </div>
             <div style={{ padding: 14, borderRadius: 14, border: '1px solid var(--border)', background: 'rgba(255,255,255,.25)' }}>
               <div className="muted" style={{ fontSize: 12, fontWeight: 800 }}>Focus blocks</div>
-              <div style={{ marginTop: 6, fontWeight: 950, fontSize: 22 }}>3 active</div>
+              <div style={{ marginTop: 6, fontWeight: 950, fontSize: 22 }}>{analytics?.focusTimeHours ?? 0}h</div>
             </div>
           </div>
         </Card>
@@ -248,7 +248,7 @@ export default function DashboardPage() {
         <Card style={{ padding: 18 }}>
           <div style={{ fontWeight: 900 }}>Motivational AI message</div>
           <div className="muted" style={{ marginTop: 8, lineHeight: 1.65 }}>
-            You’re building the habit of finishing. Next, choose the smallest task that creates forward motion.
+            {analytics?.motivationalMessage || 'Choose the smallest task that creates forward motion.'}
             <br />
             <span style={{ color: 'var(--primary)', fontWeight: 800 }}>Start with one win—then ride the wave.</span>
           </div>

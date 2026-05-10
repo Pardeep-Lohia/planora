@@ -17,10 +17,15 @@ export function AppLayout({ children }) {
       <Topbar onMenu={() => setSidebarOpen(true)} />
       <div style={{ display: 'flex' }}>
         <Sidebar open={sidebarOpen} onClose={() => setSidebarOpen(false)} />
-        <main style={{ flex: 1, padding: '84px 18px 26px' }}>
+        <main className="appMain" style={{ flex: 1, padding: '84px 18px 26px' }}>
           <div className="container">{children || <Outlet />}</div>
         </main>
       </div>
+      <style>{`
+        @media (min-width: 980px){
+          .appMain{ margin-left: 280px; }
+        }
+      `}</style>
     </div>
   );
 }

@@ -135,9 +135,10 @@ export default function PlannerPage() {
           </div>
 
           <div style={{ marginTop: 14, display: 'grid', gap: 12 }}>
-            <label>
+            <label htmlFor="planner-goals">
               <div className="muted" style={{ fontWeight: 800, fontSize: 12, marginBottom: 8 }}>Goals</div>
               <textarea
+                id="planner-goals"
                 value={goals}
                 onChange={(e) => setGoals(e.target.value)}
                 rows={9}

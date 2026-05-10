@@ -4,6 +4,7 @@ import { Button } from '../components/ui/Button.jsx';
 
 import { tasksApi } from '../api/tasksApi.js';
 import { analyticsApi } from '../api/analyticsApi.js';
+import { normalizeDate } from '../utils/date.js';
 
 
 function ProgressBar({ value = 0 }) {
@@ -82,7 +83,7 @@ export default function DashboardPage() {
           title: t.title,
           priority: t.priority,
           // dashboard UI expects a time string; backend returns dueDate.
-          time: t.dueDate ? new Date(t.dueDate.seconds ? t.dueDate.seconds * 1000 : t.dueDate).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : ''
+          time: normalizeDate(t.dueDate)?.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) || ''
         }));
 
         if (cancelled) return;

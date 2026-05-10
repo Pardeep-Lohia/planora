@@ -84,7 +84,13 @@ async function sendMessage({ userId, message, chatId }) {
   const taskContext = await getTaskContext({ userId });
 
   const prompt = `Saved task context:\n${taskContext}\n\nConversation so far:\n${context}\n\nUser message: ${message}`;
-  const aiText = await aiService.generateText({ prompt, systemInstruction: SYSTEM });
+  let aiText;
+  try {
+    aiText = await aiService.generateText({ prompt, systemInstruction: SYSTEM });
+  } catch (e) {
+    aiText =
+      'I could not reach the AI planner service right now, but your message was saved. Try a small next step from your current task list, then send another message in a moment.';
+  }
 
   const reply = { role: 'ai', text: aiText, createdAt: new Date() };
   const finalMessages = [...nextMessages, reply];

@@ -3,6 +3,7 @@ import { Card } from '../components/ui/Card.jsx';
 import { Button } from '../components/ui/Button.jsx';
 import { Input } from '../components/ui/Input.jsx';
 import { tasksApi } from '../api/tasksApi.js';
+import { normalizeDate } from '../utils/date.js';
 
 const PRIORITIES = ['High', 'Medium', 'Low'];
 const CATEGORIES = ['Work', 'Personal', 'Health', 'Learning'];
@@ -16,8 +17,8 @@ const emptyForm = {
 };
 
 function toInputDate(value) {
-  if (!value) return '';
-  const d = value.seconds ? new Date(value.seconds * 1000) : new Date(value);
+  const d = normalizeDate(value);
+  if (!d) return '';
   if (Number.isNaN(d.getTime())) return '';
   return d.toISOString().slice(0, 16);
 }
@@ -221,7 +222,7 @@ export default function TasksPage() {
                 <div style={{ marginTop: 8, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                   <span className="badge">{task.priority}</span>
                   <span className="badge">{task.category}</span>
-                  <span className="badge">{task.dueDate ? new Date(task.dueDate.seconds ? task.dueDate.seconds * 1000 : task.dueDate).toLocaleString() : 'No due date'}</span>
+                  <span className="badge">{normalizeDate(task.dueDate)?.toLocaleString() || 'No due date'}</span>
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
